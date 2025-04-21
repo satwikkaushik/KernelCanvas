@@ -11,8 +11,6 @@ import ListItem from '@mui/material/ListItem';
 import ListItemText from '@mui/material/ListItemText';
 import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
-import Snackbar from '@mui/material/Snackbar';
-import Alert from '@mui/material/Alert';
 
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SearchIcon from '@mui/icons-material/Search';
@@ -22,6 +20,7 @@ import MenuIcon from '@mui/icons-material/Menu';
 import MenuOpenIcon from '@mui/icons-material/MenuOpen';
 
 import dockerApi from '../services/dockerApi';
+import { useSnackbarContext } from '../context/SnackbarContext';
 
 const ToolbarComponent = ({ onToggleSidebar, isSidebarOpen }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -31,11 +30,9 @@ const ToolbarComponent = ({ onToggleSidebar, isSidebarOpen }) => {
   const [isMouseOverResults, setIsMouseOverResults] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
   const [isPulling, setIsPulling] = useState(false);
-  const [snackbar, setSnackbar] = useState({
-    open: false,
-    message: '',
-    severity: 'success',
-  });
+  
+  // Use our new snackbar context
+  const { showSuccess, showError, showInfo } = useSnackbarContext();
   
   const searchInputRef = useRef(null);
   const searchResultsRef = useRef(null);
@@ -78,6 +75,7 @@ const ToolbarComponent = ({ onToggleSidebar, isSidebarOpen }) => {
     } catch (error) {
       console.error('Error searching Docker Hub:', error);
       setSearchResults([]);
+      showError(`Failed to search Docker Hub: ${error.message}`);
     } finally {
       setIsSearching(false);
     }
@@ -150,6 +148,11 @@ const ToolbarComponent = ({ onToggleSidebar, isSidebarOpen }) => {
     }
   };
 
+  const handleCloseSearch = () => {
+    setIsSearchFocused(false);
+    setIsMouseOverResults(false);
+  };
+
   const handlePullImage = async (image) => {
     if (!image) return;
     
@@ -160,12 +163,15 @@ const ToolbarComponent = ({ onToggleSidebar, isSidebarOpen }) => {
       const imageName = image.fullName || image.name;
       const tag = 'latest'; // Can be updated to allow tag selection
       
-      await dockerApi.pullImage(imageName, tag);
-      
-      setSnackbar({
-        open: true,
-        message: `Successfully pulled ${imageName}:${tag}`,
-        severity: 'success',
+      // Using the new status change callback in dockerApi
+      await dockerApi.pullImage(imageName, tag, ({ status, message }) => {
+        if (status === 'pulling') {
+          showInfo(message);
+        } else if (status === 'success') {
+          showSuccess(message);
+        } else if (status === 'error') {
+          showError(message);
+        }
       });
       
       handleCloseSearch();
@@ -175,26 +181,20 @@ const ToolbarComponent = ({ onToggleSidebar, isSidebarOpen }) => {
       }, 1500);
     } catch (error) {
       console.error('Error pulling image:', error);
-      setSnackbar({
-        open: true,
-        message: `Failed to pull image: ${error.message}`,
-        severity: 'error',
-      });
+      // The error notification will be handled by the onStatusChange callback
     } finally {
       setIsPulling(false);
     }
   };
 
-  const handleCloseSnackbar = () => {
-    setSnackbar({ ...snackbar, open: false });
-  };
-
   return (
     <>
-      <AppBar position="static" color="primary" elevation={1}>        <Toolbar variant="dense" sx={{
+      <AppBar position="static" color="primary" elevation={1}>
+        <Toolbar variant="dense" sx={{
           bgcolor: 'primary.dark',
           height: '64px',
-        }}>          <IconButton 
+        }}>
+          <IconButton 
             edge="start" 
             color="inherit" 
             aria-label="toggle sidebar"
@@ -405,22 +405,6 @@ const ToolbarComponent = ({ onToggleSidebar, isSidebarOpen }) => {
           </Tooltip>
         </Toolbar>
       </AppBar>
-
-      {/* Snackbar for notifications */}
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={6000}
-        onClose={handleCloseSnackbar}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-      >
-        <Alert 
-          onClose={handleCloseSnackbar} 
-          severity={snackbar.severity} 
-          sx={{ width: '100%' }}
-        >
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
     </>
   );
 };

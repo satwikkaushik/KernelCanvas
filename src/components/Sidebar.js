@@ -5,9 +5,8 @@ import Button from '@mui/material/Button';
 import Drawer from '@mui/material/Drawer';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
-import ListItemButton from '@mui/material/ListItemButton';
-import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
+import ListItemIcon from '@mui/material/ListItemIcon';
 import Typography from '@mui/material/Typography';
 import Divider from '@mui/material/Divider';
 import Tabs from '@mui/material/Tabs';
@@ -17,20 +16,116 @@ import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
 import TextField from '@mui/material/TextField';
-import Select from '@mui/material/Select';
-import MenuItem from '@mui/material/MenuItem';
-import FormControl from '@mui/material/FormControl';
-import InputLabel from '@mui/material/InputLabel';
 import CircularProgress from '@mui/material/CircularProgress';
-import AddIcon from '@mui/icons-material/Add';
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
-import ContainerIcon from '@mui/icons-material/ViewInAr';
 import ImageIcon from '@mui/icons-material/PhotoLibrary';
-import VolumeIcon from '@mui/icons-material/Storage';
 import NetworkIcon from '@mui/icons-material/NetworkWifi';
 import Tooltip from '@mui/material/Tooltip';
-import { useSnackbar } from 'notistack';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import SvgIcon from '@mui/material/SvgIcon';
 import dockerApi from '../services/dockerApi';
+import { useSnackbarContext } from '../context/SnackbarContext';
+
+// Custom icons for specific images
+const NodeIcon = (props) => (
+  <SvgIcon {...props}>
+    <path d="M12 21.7C9.2 20 4 16.5 4 11V5l8-3l8 3v6c0 5.5-5.2 9-8 10.7zm0-16c-2.2 0-4 1.8-4 4s1.8 4 4 4s4-1.8 4-4s-1.8-4-4-4z" />
+  </SvgIcon>
+);
+
+const MongoIcon = (props) => (
+  <SvgIcon {...props}>
+    <path d="M12 3C7.58 3 4 6.58 4 11c0 4.42 3.58 8 8 8s8-3.58 8-8c0-4.42-3.58-8-8-8zm0 11c-1.66 0-3-1.34-3-3s1.34-3 3-3s3 1.34 3 3s-1.34 3-3 3z" />
+  </SvgIcon>
+);
+
+const UbuntuIcon = (props) => (
+  <SvgIcon {...props}>
+    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93c0-.62.08-1.21.21-1.79L6 11v1c0 1.1.9 2 2 2v1c0 .55.45 1 1 1c.55 0 1-.45 1-1v-1c1.1 0 2-.9 2-2v-1l1.79-.2c.13.58.21 1.17.21 1.8c0 4.08-3.05 7.44-7 7.93z" />
+  </SvgIcon>
+);
+
+const getImageIcon = (imageName) => {
+  const lowerName = (imageName || "").toLowerCase();
+  
+  if (lowerName.includes('node')) {
+    return <NodeIcon sx={{ color: '#8BC34A' }} />;
+  } else if (lowerName.includes('mongo') || lowerName.includes('mongodb')) {
+    return <MongoIcon sx={{ color: '#4CAF50' }} />;
+  } else if (lowerName.includes('ubuntu')) {
+    return <UbuntuIcon sx={{ color: '#FF5722' }} />;
+  } else {
+    return <ImageIcon />;
+  }
+};
+
+const getImageColor = (imageName) => {
+  const lowerName = (imageName || "").toLowerCase();
+  
+  if (lowerName.includes('node')) {
+    return 'rgba(139, 195, 74, 0.1)';
+  } else if (lowerName.includes('mongo') || lowerName.includes('mongodb')) {
+    return 'rgba(76, 175, 80, 0.1)';
+  } else if (lowerName.includes('ubuntu')) {
+    return 'rgba(255, 87, 34, 0.1)';
+  } else {
+    return 'rgba(33, 150, 243, 0.1)';
+  }
+};
+
+// Draggable item component for images
+const DraggableImageItem = ({ item }) => {
+  const [{ isDragging }, drag] = useDrag(() => ({
+    type: 'IMAGE',
+    item: { type: 'IMAGE', data: item },
+    collect: (monitor) => ({
+      isDragging: !!monitor.isDragging(),
+    }),
+  }));
+
+  // Parse tag information
+  const imageTag = item.RepoTags && item.RepoTags.length > 0 
+    ? item.RepoTags[0] 
+    : 'Unknown:latest';
+  
+  const [name, version] = imageTag.split(':');
+  const displayName = name.split('/').pop();
+
+  return (
+    <Card
+      ref={drag}
+      className="draggable-image-item"
+      sx={{
+        opacity: isDragging ? 0.5 : 1,
+        my: 1,
+        cursor: 'move',
+        backgroundColor: getImageColor(displayName),
+        transition: 'all 0.2s ease',
+        '&:hover': {
+          transform: 'translateY(-4px)',
+          boxShadow: '0 4px 8px rgba(0, 0, 0, 0.2)',
+        },
+      }}
+    >
+      <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Box sx={{ mr: 1, display: 'flex', alignItems: 'center' }}>
+            {getImageIcon(displayName)}
+          </Box>
+          <Box sx={{ flexGrow: 1 }}>
+            <Typography variant="body2" fontWeight="bold" noWrap sx={{ maxWidth: 160 }}>
+              {displayName}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {version || 'latest'}
+            </Typography>
+          </Box>
+        </Box>
+      </CardContent>
+    </Card>
+  );
+};
 
 // Draggable item component
 const DraggableItem = ({ type, item, icon }) => {
@@ -80,21 +175,12 @@ const TabPanel = (props) => {
   );
 };
 
-const Sidebar = ({ containers, images, volumes, networks, isLoading, open, onClose }) => {
+const Sidebar = ({ images, networks, isLoading, open, onClose }) => {
   const [tabValue, setTabValue] = useState(0);
   const drawerWidth = 280;
-  const { enqueueSnackbar } = useSnackbar();
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const { showSuccess, showError, showInfo } = useSnackbarContext();
   const [pullDialogOpen, setPullDialogOpen] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
   const [isPulling, setIsPulling] = useState(false);
-  const [newContainerData, setNewContainerData] = useState({
-    name: '',
-    image: '',
-    ports: '',
-    env: '',
-    volumes: '',
-  });
   const [pullImageData, setPullImageData] = useState({
     imageName: '',
     tag: 'latest'
@@ -102,14 +188,6 @@ const Sidebar = ({ containers, images, volumes, networks, isLoading, open, onClo
 
   const handleTabChange = (event, newValue) => {
     setTabValue(newValue);
-  };
-
-  const handleCreateDialogOpen = () => {
-    setCreateDialogOpen(true);
-  };
-
-  const handleCreateDialogClose = () => {
-    setCreateDialogOpen(false);
   };
 
   const handlePullDialogOpen = () => {
@@ -120,14 +198,6 @@ const Sidebar = ({ containers, images, volumes, networks, isLoading, open, onClo
     setPullDialogOpen(false);
   };
 
-  const handleContainerDataChange = (e) => {
-    const { name, value } = e.target;
-    setNewContainerData((prev) => ({
-      ...prev,
-      [name]: value
-    }));
-  };
-
   const handlePullDataChange = (e) => {
     const { name, value } = e.target;
     setPullImageData((prev) => ({
@@ -136,77 +206,25 @@ const Sidebar = ({ containers, images, volumes, networks, isLoading, open, onClo
     }));
   };
 
-  const handleCreateContainer = async () => {
-    try {
-      setIsCreating(true);
-      
-      // Format ports as array of objects
-      const ports = newContainerData.ports 
-        ? newContainerData.ports.split(',').map(port => {
-            const [hostPort, containerPort] = port.trim().split(':');
-            return { hostPort: parseInt(hostPort), containerPort: parseInt(containerPort || hostPort) };
-          })
-        : [];
-      
-      // Format env vars as array of string
-      const env = newContainerData.env
-        ? newContainerData.env.split(',').map(e => e.trim())
-        : [];
-      
-      // Format volumes as array of objects
-      const volumes = newContainerData.volumes
-        ? newContainerData.volumes.split(',').map(volume => {
-            const [source, target] = volume.trim().split(':');
-            return { source, target };
-          })
-        : [];
-        
-      const containerConfig = {
-        name: newContainerData.name,
-        Image: newContainerData.image,
-        ExposedPorts: ports.reduce((obj, port) => {
-          obj[`${port.containerPort}/tcp`] = {};
-          return obj;
-        }, {}),
-        HostConfig: {
-          PortBindings: ports.reduce((obj, port) => {
-            obj[`${port.containerPort}/tcp`] = [{ HostPort: port.hostPort.toString() }];
-            return obj;
-          }, {}),
-          Binds: volumes.map(v => `${v.source}:${v.target}`)
-        },
-        Env: env
-      };
-      
-      await dockerApi.createContainer(containerConfig);
-      
-      enqueueSnackbar('Container created successfully!', { variant: 'success' });
-      handleCreateDialogClose();
-      setNewContainerData({
-        name: '',
-        image: '',
-        ports: '',
-        env: '',
-        volumes: '',
-      });
-      
-      // Refresh the page to show the new container
-      setTimeout(() => {
-        window.location.reload();
-      }, 1000);
-    } catch (error) {
-      console.error('Error creating container:', error);
-      enqueueSnackbar(`Error creating container: ${error.message}`, { variant: 'error' });
-    } finally {
-      setIsCreating(false);
-    }
-  };
-
   const handlePullImage = async () => {
     try {
       setIsPulling(true);
-      await dockerApi.pullImage(pullImageData.imageName, pullImageData.tag);
-      enqueueSnackbar(`Successfully pulled ${pullImageData.imageName}:${pullImageData.tag}`, { variant: 'success' });
+      
+      // Using the enhanced API with status updates
+      await dockerApi.pullImage(
+        pullImageData.imageName, 
+        pullImageData.tag,
+        ({ status, message }) => {
+          if (status === 'pulling') {
+            showInfo(message);
+          } else if (status === 'success') {
+            showSuccess(message);
+          } else if (status === 'error') {
+            showError(message);
+          }
+        }
+      );
+      
       handlePullDialogClose();
       setPullImageData({ imageName: '', tag: 'latest' });
       
@@ -216,7 +234,7 @@ const Sidebar = ({ containers, images, volumes, networks, isLoading, open, onClo
       }, 1000);
     } catch (error) {
       console.error('Error pulling image:', error);
-      enqueueSnackbar(`Error pulling image: ${error.message}`, { variant: 'error' });
+      // Error is already handled by the callback
     } finally {
       setIsPulling(false);
     }
@@ -246,7 +264,7 @@ const Sidebar = ({ containers, images, volumes, networks, isLoading, open, onClo
         </Typography>
       </Box>
       <Divider />
-        <Tabs
+      <Tabs
         value={tabValue}
         onChange={handleTabChange}
         variant="scrollable"
@@ -263,9 +281,7 @@ const Sidebar = ({ containers, images, volumes, networks, isLoading, open, onClo
           },
         }}
       >
-        <Tab label="Containers" />
         <Tab label="Images" />
-        <Tab label="Volumes" />
         <Tab label="Networks" />
       </Tabs>
       
@@ -275,44 +291,8 @@ const Sidebar = ({ containers, images, volumes, networks, isLoading, open, onClo
         </Box>
       ) : (
         <>
-          {/* Containers Tab */}
-          <TabPanel value={tabValue} index={0}>
-            <Box sx={{ mb: 2, display: 'flex', justifyContent: 'center' }}>
-              <Button 
-                variant="contained" 
-                color="primary" 
-                startIcon={<AddIcon />}
-                onClick={handleCreateDialogOpen}
-                fullWidth
-              >
-                Create Container
-              </Button>
-            </Box>
-            {containers.length === 0 ? (
-              <Typography variant="body2" color="text.secondary">
-                No containers found
-              </Typography>
-            ) : (
-              <List>
-                {containers.map((container) => (
-                  <ListItem key={container.Id} disablePadding>
-                    <Tooltip title={container.Image} placement="right">
-                      <div>
-                        <DraggableItem
-                          type="CONTAINER"
-                          item={container}
-                          icon={<ContainerIcon color={container.State === 'running' ? 'success' : 'disabled'} />}
-                        />
-                      </div>
-                    </Tooltip>
-                  </ListItem>
-                ))}
-              </List>
-            )}
-          </TabPanel>
-          
           {/* Images Tab */}
-          <TabPanel value={tabValue} index={1}>
+          <TabPanel value={tabValue} index={0}>
             <Box sx={{ mb: 2, display: 'flex', justifyContent: 'center' }}>
               <Button 
                 variant="contained" 
@@ -329,41 +309,15 @@ const Sidebar = ({ containers, images, volumes, networks, isLoading, open, onClo
                 No images found
               </Typography>
             ) : (
-              <List>
+              <List sx={{ p: 0 }}>
                 {images.map((image) => (
-                  <ListItem key={image.Id} disablePadding>
-                    <Tooltip title={image.RepoTags ? image.RepoTags[0] : 'No tag'} placement="right">
+                  <ListItem key={image.Id} disablePadding sx={{ display: 'block' }}>
+                    <Tooltip 
+                      title={(image.RepoTags && image.RepoTags.length > 0) ? image.RepoTags[0] : 'No tag'} 
+                      placement="right"
+                    >
                       <div>
-                        <DraggableItem
-                          type="IMAGE"
-                          item={image}
-                          icon={<ImageIcon />}
-                        />
-                      </div>
-                    </Tooltip>
-                  </ListItem>
-                ))}
-              </List>
-            )}
-          </TabPanel>
-          
-          {/* Volumes Tab */}
-          <TabPanel value={tabValue} index={2}>
-            {volumes.length === 0 ? (
-              <Typography variant="body2" color="text.secondary">
-                No volumes found
-              </Typography>
-            ) : (
-              <List>
-                {volumes.map((volume) => (
-                  <ListItem key={volume.Name} disablePadding>
-                    <Tooltip title={volume.Driver} placement="right">
-                      <div>
-                        <DraggableItem
-                          type="VOLUME"
-                          item={volume}
-                          icon={<VolumeIcon />}
-                        />
+                        <DraggableImageItem item={image} />
                       </div>
                     </Tooltip>
                   </ListItem>
@@ -373,7 +327,7 @@ const Sidebar = ({ containers, images, volumes, networks, isLoading, open, onClo
           </TabPanel>
           
           {/* Networks Tab */}
-          <TabPanel value={tabValue} index={3}>
+          <TabPanel value={tabValue} index={1}>
             {networks.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
                 No networks found
@@ -398,90 +352,6 @@ const Sidebar = ({ containers, images, volumes, networks, isLoading, open, onClo
           </TabPanel>
         </>
       )}
-
-      {/* Create Container Dialog */}
-      <Dialog open={createDialogOpen} onClose={handleCreateDialogClose} maxWidth="sm" fullWidth>
-        <DialogTitle>Create New Container</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            name="name"
-            label="Container Name"
-            type="text"
-            fullWidth
-            variant="outlined"
-            value={newContainerData.name}
-            onChange={handleContainerDataChange}
-            sx={{ mb: 2 }}
-          />
-          <FormControl fullWidth sx={{ mb: 2 }}>
-            <InputLabel id="image-select-label">Docker Image</InputLabel>
-            <Select
-              labelId="image-select-label"
-              name="image"
-              value={newContainerData.image}
-              label="Docker Image"
-              onChange={handleContainerDataChange}
-            >
-              {images.map(image => (
-                <MenuItem 
-                  key={image.Id} 
-                  value={image.RepoTags ? image.RepoTags[0] : image.Id.substring(7)}
-                >
-                  {image.RepoTags ? image.RepoTags[0] : image.Id.substring(7, 19)}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <TextField
-            margin="dense"
-            name="ports"
-            label="Port Mappings (hostPort:containerPort, ...)"
-            placeholder="8080:80, 3000:3000"
-            type="text"
-            fullWidth
-            variant="outlined"
-            value={newContainerData.ports}
-            onChange={handleContainerDataChange}
-            sx={{ mb: 2 }}
-          />
-          <TextField
-            margin="dense"
-            name="env"
-            label="Environment Variables (KEY=VALUE, ...)"
-            placeholder="NODE_ENV=production, DEBUG=false"
-            type="text"
-            fullWidth
-            variant="outlined"
-            value={newContainerData.env}
-            onChange={handleContainerDataChange}
-            sx={{ mb: 2 }}
-          />
-          <TextField
-            margin="dense"
-            name="volumes"
-            label="Volume Mappings (hostPath:containerPath, ...)"
-            placeholder="/host/path:/container/path, ..."
-            type="text"
-            fullWidth
-            variant="outlined"
-            value={newContainerData.volumes}
-            onChange={handleContainerDataChange}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCreateDialogClose} sx={{ color: 'white'}}>Cancel</Button>
-          <Button 
-            onClick={handleCreateContainer} 
-            variant="contained" 
-            color="primary"
-            disabled={isCreating || !newContainerData.image}
-          >
-            {isCreating ? 'Creating...' : 'Create'}
-          </Button>
-        </DialogActions>
-      </Dialog>
       
       {/* Pull Image Dialog */}
       <Dialog open={pullDialogOpen} onClose={handlePullDialogClose} maxWidth="sm" fullWidth>

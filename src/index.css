@@ -49,6 +49,16 @@ code {
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }
 
+/* Enhanced image items in sidebar */
+.draggable-image-item {
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  cursor: grab;
+}
+
+.draggable-image-item:active {
+  cursor: grabbing;
+}
+
 .canvas-node {
   position: absolute;
   padding: 15px;
@@ -71,6 +81,27 @@ code {
 
 .node-network {
   background-color: #ffe0b2;
+  border: 2px solid #ffcc80;
+}
+
+.node-image {
+  background-color: #e1f5fe;
+  border: 2px solid #81d4fa;
+}
+
+/* Specific styling for different images */
+.node-image.node-mongo {
+  background-color: #e8f5e9;
+  border: 2px solid #a5d6a7;
+}
+
+.node-image.node-node {
+  background-color: #f1f8e9;
+  border: 2px solid #aed581;
+}
+
+.node-image.node-ubuntu {
+  background-color: #fff3e0;
   border: 2px solid #ffcc80;
 }
 
