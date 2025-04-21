@@ -20,6 +20,23 @@ import NetworkNode from './nodes/NetworkNode';
 import ImageNode from './nodes/ImageNode';
 import VolumeNode from './nodes/VolumeNode';
 
+// Function to convert Windows path to Linux format
+const convertToLinuxPath = (windowsPath) => {
+  // Return empty string if path is empty
+  if (!windowsPath) return '';
+  
+  // Replace backslashes with forward slashes
+  let linuxPath = windowsPath.replace(/\\/g, '/');
+  
+  // Handle drive letter (e.g., C: -> /c)
+  if (/^[a-zA-Z]:/.test(linuxPath)) {
+    const driveLetter = linuxPath.charAt(0).toLowerCase();
+    linuxPath = `/${driveLetter}${linuxPath.slice(2)}`;
+  }
+  console.log('Converted path:', linuxPath);
+  return linuxPath;
+};
+
 const Canvas = ({ networks, onNodeSelect }) => {
   const [canvasNodes, setCanvasNodes] = useState([]);
   const [connections, setConnections] = useState([]);
@@ -72,6 +89,9 @@ const Canvas = ({ networks, onNodeSelect }) => {
     const x = Math.random() * 300 + 100;
     const y = Math.random() * 200 + 100;
 
+    // Convert Windows path to Linux path if provided
+    const convertedPath = convertToLinuxPath(volumeConfig.path);
+
     // Create a new volume node
     const id = `volume-${Date.now()}`;
     const newNode = {
@@ -81,7 +101,7 @@ const Canvas = ({ networks, onNodeSelect }) => {
       y,
       data: {
         name: volumeConfig.name || 'New Volume',
-        path: volumeConfig.path || '/path/to/volume'
+        path: convertedPath || '/path/to/volume'
       }
     };
 
