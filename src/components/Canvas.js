@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { useDrop } from 'react-dnd';
 import Box from '@mui/material/Box';
 import Paper from '@mui/material/Paper';
@@ -14,11 +14,15 @@ import InputLabel from '@mui/material/InputLabel';
 import FormHelperText from '@mui/material/FormHelperText';
 import Fab from '@mui/material/Fab';
 import FolderIcon from '@mui/icons-material/Folder';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import Tooltip from '@mui/material/Tooltip';
+import Snackbar from '@mui/material/Snackbar';
+import Alert from '@mui/material/Alert';
 
 import NetworkNode from './nodes/NetworkNode';
 import ImageNode from './nodes/ImageNode';
 import VolumeNode from './nodes/VolumeNode';
+import * as dockerApi from '../services/dockerApi';
 
 // Function to convert Windows path to Linux format
 const convertToLinuxPath = (windowsPath) => {
@@ -56,8 +60,14 @@ const Canvas = ({ networks, onNodeSelect }) => {
     path: ''
   });
 
+  // Connection-related state
+  const [activeConnection, setActiveConnection] = useState(null);
+  const [connectionPoints, setConnectionPoints] = useState({});
+  const [feedback, setFeedback] = useState({ open: false, message: '', severity: 'success' });
+  const canvasRef = useRef(null);
+  const tempConnectionRef = useRef(null);
   // Define drop handling for the canvas
-  const [{ isOver }, drop] = useDrop(() => ({
+  const [{ isOver }, drop] = useDrop({
     accept: ['NETWORK', 'IMAGE'],
     drop: (item, monitor) => {
       const offset = monitor.getClientOffset();
@@ -72,9 +82,85 @@ const Canvas = ({ networks, onNodeSelect }) => {
     collect: (monitor) => ({
       isOver: !!monitor.isOver(),
     }),
-  }));
+  });
 
-  // Volume-related handlers
+  // Set up a global registry for connection points
+  useEffect(() => {
+    window.updateConnectionPoint = (nodeId, pointData) => {
+      setConnectionPoints(prev => ({
+        ...prev,
+        [nodeId]: pointData
+      }));
+    };
+
+    window.activeConnection = activeConnection;
+
+    return () => {
+      delete window.updateConnectionPoint;
+      delete window.activeConnection;
+    };
+  }, [activeConnection]);
+
+  // Update temporary connection line while dragging
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (activeConnection && tempConnectionRef.current) {
+        const { clientX, clientY } = e;
+        drawTemporaryConnection(clientX, clientY);
+      }
+    };
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && activeConnection) {
+        cancelConnection();
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('keydown', handleKeyDown);    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [activeConnection]);
+
+  // Handle events from React DevTools
+  window.addEventListener('error', (e) => {
+    console.error('Window error:', e);
+  });
+  // Draw a temporary connection that follows the mouse
+  const drawTemporaryConnection = (mouseX, mouseY) => {
+    if (!tempConnectionRef.current || !activeConnection) return;
+    
+    const { sourceX, sourceY } = activeConnection;
+    const canvasRect = document.getElementById('canvas').getBoundingClientRect();
+    
+    // Convert mouse coordinates to canvas-relative
+    const relativeMouseX = mouseX - canvasRect.left;
+    const relativeMouseY = mouseY - canvasRect.top;
+    
+    // Calculate angle and length for the line
+    const dx = relativeMouseX - sourceX;
+    const dy = relativeMouseY - sourceY;
+    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    
+    // Set the line position and rotation
+    tempConnectionRef.current.style.width = `${length}px`;
+    tempConnectionRef.current.style.left = `${sourceX}px`;
+    tempConnectionRef.current.style.top = `${sourceY}px`;
+    tempConnectionRef.current.style.transform = `rotate(${angle}deg)`;
+    tempConnectionRef.current.style.display = 'block';
+  };
+
+  // Cancel the active connection
+  const cancelConnection = () => {
+    if (tempConnectionRef.current) {
+      tempConnectionRef.current.style.display = 'none';
+    }
+    setActiveConnection(null);
+  };
+
+  // Add the volume dialog open/close handlers
   const handleVolumeDialogOpen = () => {
     setVolumeConfig({ name: '', path: '' });
     setVolumeDialogOpen(true);
@@ -82,6 +168,90 @@ const Canvas = ({ networks, onNodeSelect }) => {
 
   const handleVolumeDialogClose = () => {
     setVolumeDialogOpen(false);
+  };
+
+  // Handle starting a connection from a node
+  const handleStartConnection = (sourceId, sourceType, position, sourceData) => {
+    // Only allow connections to start from volume nodes
+    if (sourceType !== 'VOLUME') {
+      setFeedback({
+        open: true,
+        message: 'Connections must start from volume nodes',
+        severity: 'error'
+      });
+      return;
+    }
+
+    setActiveConnection({
+      sourceId,
+      sourceType,
+      sourceX: position.x,
+      sourceY: position.y,
+      sourceData
+    });
+  };
+
+  // Handle completing a connection to a target node
+  const handleEndConnection = (targetId, targetType, position, targetData) => {
+    // Only allow connections to end at image nodes
+    if (!activeConnection || targetType !== 'IMAGE') {
+      setFeedback({
+        open: true,
+        message: 'Connections must end at image nodes',
+        severity: 'error'
+      });
+      return;
+    }
+    
+    // Hide the temporary connection line
+    if (tempConnectionRef.current) {
+      tempConnectionRef.current.style.display = 'none';
+    }
+    
+    const { sourceId, sourceData } = activeConnection;
+    
+    // Create a connection object
+    const newConnection = {
+      id: `conn-${sourceId}-${targetId}`,
+      sourceId,
+      targetId,
+      sourceX: activeConnection.sourceX,
+      sourceY: activeConnection.sourceY,
+      targetX: position.x,
+      targetY: position.y,
+      volumeData: sourceData,
+    };
+    
+    // Update the image node with the volume path information
+    setCanvasNodes(canvasNodes.map(node => {
+      if (node.id === targetId) {
+        // Add the volume path to the container config
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            containerConfig: {
+              ...node.data.containerConfig,
+              volumePath: sourceData.path,
+              volumeName: sourceData.name
+            }
+          }
+        };
+      }
+      return node;
+    }));
+    
+    // Add the connection to the list
+    setConnections([...connections, newConnection]);    // Show success message
+    setFeedback({
+      open: true,
+      message: `Connected volume "${sourceData.name}" to container - mounted at /data/${sourceData.name}`,
+      severity: 'success',
+      autoHideDuration: 4000
+    });
+    
+    // Reset the active connection
+    setActiveConnection(null);
   };
 
   const handleVolumeCreate = () => {
@@ -107,6 +277,36 @@ const Canvas = ({ networks, onNodeSelect }) => {
 
     setCanvasNodes([...canvasNodes, newNode]);
     setVolumeDialogOpen(false);
+  };
+  // Handle node deletion
+  const handleNodeDelete = (nodeId) => {
+    // Ask for confirmation first
+    const nodeToDelete = canvasNodes.find(node => node.id === nodeId);
+    const nodeType = nodeToDelete?.type?.toLowerCase() || 'node';
+    
+    if (!window.confirm(`Are you sure you want to delete this ${nodeType}? Any connections to this node will also be removed.`)) {
+      return;
+    }
+    
+    // Remove any connections associated with this node
+    const filteredConnections = connections.filter(conn => 
+      conn.sourceId !== nodeId && conn.targetId !== nodeId
+    );
+    
+    // If connections were removed, update the state
+    if (filteredConnections.length !== connections.length) {
+      setConnections(filteredConnections);
+    }
+    
+    // Remove the node from the canvas
+    setCanvasNodes(canvasNodes.filter(node => node.id !== nodeId));
+      // Show feedback
+    setFeedback({
+      open: true,
+      message: `${nodeType.charAt(0).toUpperCase() + nodeType.slice(1)} removed from canvas`,
+      severity: 'info',
+      autoHideDuration: 4000
+    });
   };
 
   // Handle dropping an item onto the canvas
@@ -243,33 +443,154 @@ const Canvas = ({ networks, onNodeSelect }) => {
     
     setConnections([...connections, newConnection]);
   };
-
-  // Render connection line between nodes
-  const renderConnection = (conn) => {
+  // Enhanced connection line with tooltip
+  const renderConnectionWithTooltip = (conn) => {
     const dx = conn.targetX - conn.sourceX;
     const dy = conn.targetY - conn.sourceY;
     const angle = Math.atan2(dy, dx) * 180 / Math.PI;
     const length = Math.sqrt(dx * dx + dy * dy);
     
+    // Get volume data for tooltip
+    const volumeName = conn.volumeData?.name || 'Unknown volume';
+    const volumePath = conn.volumeData?.path || '/path';
+    const tooltipText = `Volume mount: ${volumeName} → /data/${volumeName}`;
+    
     return (
-      <div
+      <Tooltip 
         key={conn.id}
-        className="connection-line"
-        style={{
-          left: conn.sourceX,
-          top: conn.sourceY,
-          width: length,
-          transform: `rotate(${angle}deg)`,
-        }}
-      />
+        title={tooltipText}
+        placement="top"
+      >
+        <div
+          className="connection-line"
+          style={{
+            position: 'absolute',
+            left: conn.sourceX,
+            top: conn.sourceY,
+            width: length,
+            height: '3px',
+            backgroundColor: '#4caf50',
+            transformOrigin: 'left center',
+            transform: `rotate(${angle}deg)`,
+            zIndex: 90,
+            boxShadow: '0 0 5px rgba(76, 175, 80, 0.8)',
+            cursor: 'pointer'
+          }}
+        />
+      </Tooltip>
     );
+  };
+  // Setup the drop target functionality
+  useEffect(() => {
+    // No need for this effect since we're using the useDrop hook
+    return () => {};
+  }, []);
+
+  // Handle running all containers
+  const handleRunContainers = async () => {
+    // Filter out image nodes from canvasNodes
+    const imageNodes = canvasNodes.filter(node => node.type === 'IMAGE');
+    
+    if (imageNodes.length === 0) {
+      setFeedback({
+        open: true,
+        message: 'No images to run as containers',
+        severity: 'warning'
+      });
+      return;
+    }
+    
+    setFeedback({
+      open: true,
+      message: `Creating ${imageNodes.length} containers...`,
+      severity: 'info'
+    });
+    
+    // Track success and failure
+    let successCount = 0;
+    let failureCount = 0;
+    
+    // Create containers from each image node
+    for (const node of imageNodes) {
+      try {
+        // Extract the image name and tag
+        const imageName = node.data.RepoTags && node.data.RepoTags.length > 0 
+          ? node.data.RepoTags[0]
+          : node.data.imageName || 'unknown';
+        
+        // Prepare container configuration
+        const containerConfig = {
+          Image: imageName,
+          name: node.data.containerConfig?.name || `container_${Date.now()}`,
+          Cmd: node.data.containerConfig?.cmd || [],
+          ExposedPorts: {},
+          HostConfig: {
+            PortBindings: {},
+            Binds: []
+          },
+          Env: node.data.containerConfig?.env || []
+        };
+        
+        // Add port mappings if specified
+        if (node.data.containerConfig?.ports) {
+          const portMappings = node.data.containerConfig.ports.split(',');
+          portMappings.forEach(mapping => {
+            const [hostPort, containerPort] = mapping.trim().split(':');
+            if (hostPort && containerPort) {
+              // Define the exposed port
+              containerConfig.ExposedPorts[`${containerPort}/tcp`] = {};
+              
+              // Define the port binding
+              containerConfig.HostConfig.PortBindings[`${containerPort}/tcp`] = [
+                { HostIp: '0.0.0.0', HostPort: hostPort }
+              ];
+            }
+          });
+        }
+        
+        // Add volume binding if connected to a volume
+        if (node.data.containerConfig?.volumePath && node.data.containerConfig?.volumeName) {
+          containerConfig.HostConfig.Binds.push(
+            `${node.data.containerConfig.volumePath}:/data/${node.data.containerConfig.volumeName}`
+          );
+        }
+        
+        // Create the container
+        const response = await dockerApi.createContainer(containerConfig);
+        
+        // Start the container
+        await dockerApi.startContainer(response.containerId);
+        
+        successCount++;
+      } catch (error) {
+        console.error('Error creating/starting container:', error);
+        failureCount++;
+      }
+    }
+    
+    // Show final status
+    if (failureCount === 0) {
+      setFeedback({
+        open: true,
+        message: `Successfully created and started ${successCount} containers`,
+        severity: 'success'
+      });
+    } else {
+      setFeedback({
+        open: true,
+        message: `Created ${successCount} containers with ${failureCount} failures`,
+        severity: 'warning'
+      });
+    }
   };
 
   return (
-    <>
-      <Box
+    <>      <Box
         id="canvas"
-        ref={drop}
+        ref={(el) => {
+          drop(el);
+          canvasRef.current = el;
+        }}
         className="canvas-container"
         sx={{
           flex: 1,
@@ -279,7 +600,19 @@ const Canvas = ({ networks, onNodeSelect }) => {
           transition: 'background-color 0.2s ease',
         }}
       >
-        {/* Volume button */}
+        {/* Temporary connection line */}        <div
+          ref={tempConnectionRef}
+          className="temp-connection-line"
+          style={{
+            position: 'absolute',
+            height: '3px',
+            backgroundColor: '#4caf50',
+            transformOrigin: 'left center',
+            zIndex: 90,
+            display: 'none',
+            boxShadow: '0 0 5px rgba(76, 175, 80, 0.8)'
+          }}
+        />{/* Volume button */}
         <Box sx={{ position: 'absolute', top: 10, left: 10, zIndex: 1000 }}>
           <Tooltip title="Create Volume">
             <Fab
@@ -313,14 +646,11 @@ const Canvas = ({ networks, onNodeSelect }) => {
         )}
         
         {/* Render connections between nodes */}
-        {connections.map(conn => renderConnection(conn))}
-        
-        {/* Render all nodes placed on the canvas */}
+        {connections.map(conn => renderConnectionWithTooltip(conn))}        {/* Render all nodes placed on the canvas */}
         {canvasNodes.map(node => {
           switch (node.type) {
             case 'NETWORK':
-              return (
-                <NetworkNode
+              return (                <NetworkNode
                   key={node.id}
                   id={node.id}
                   x={node.x}
@@ -328,12 +658,11 @@ const Canvas = ({ networks, onNodeSelect }) => {
                   data={node.data}
                   onMove={handleNodeMove}
                   onSelect={() => onNodeSelect(node)}
-                  onConnect={handleCreateConnection}
+                  onDelete={handleNodeDelete}
                 />
               );
             case 'IMAGE':
-              return (
-                <ImageNode
+              return (                <ImageNode
                   key={node.id}
                   id={node.id}
                   x={node.x}
@@ -341,11 +670,13 @@ const Canvas = ({ networks, onNodeSelect }) => {
                   data={node.data}
                   onMove={handleNodeMove}
                   onSelect={() => onNodeSelect(node)}
+                  onEndConnection={handleEndConnection}
+                  onCancelConnection={cancelConnection}
+                  onDelete={handleNodeDelete}
                 />
               );
             case 'VOLUME':
-              return (
-                <VolumeNode
+              return (                <VolumeNode
                   key={node.id}
                   id={node.id}
                   x={node.x}
@@ -353,6 +684,9 @@ const Canvas = ({ networks, onNodeSelect }) => {
                   data={node.data}
                   onMove={handleNodeMove}
                   onSelect={() => onNodeSelect(node)}
+                  onStartConnection={handleStartConnection}
+                  onDelete={handleNodeDelete}
+                  connections={connections}
                 />
               );
             default:
@@ -509,7 +843,22 @@ const Canvas = ({ networks, onNodeSelect }) => {
             Create
           </Button>
         </DialogActions>
-      </Dialog>
+      </Dialog>      {/* Feedback Snackbar */}
+      <Snackbar 
+        open={feedback.open} 
+        autoHideDuration={feedback.autoHideDuration || 6000} 
+        onClose={() => setFeedback(prev => ({ ...prev, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        sx={{ zIndex: 2000 }}
+      >
+        <Alert 
+          onClose={() => setFeedback(prev => ({ ...prev, open: false }))} 
+          severity={feedback.severity}
+          sx={{ width: '100%' }}
+        >
+          {feedback.message}
+        </Alert>
+      </Snackbar>
     </>
   );
 };

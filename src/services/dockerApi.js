@@ -31,6 +31,32 @@ export const startContainer = async (containerId, onStatusChange) => {
   }
 };
 
+export const pauseContainer = async (containerId, onStatusChange) => {
+  try {
+    if (onStatusChange) onStatusChange({ status: 'pausing', message: 'Pausing container...' });
+    const response = await api.post('/containers/pause', { containerId });
+    if (onStatusChange) onStatusChange({ status: 'success', message: 'Container paused successfully' });
+    return response.data;
+  } catch (error) {
+    console.error('Error pausing container:', error);
+    if (onStatusChange) onStatusChange({ status: 'error', message: `Failed to pause container: ${error.message}` });
+    throw error;
+  }
+};
+
+export const unpauseContainer = async (containerId, onStatusChange) => {
+  try {
+    if (onStatusChange) onStatusChange({ status: 'unpausing', message: 'Resuming container...' });
+    const response = await api.post('/containers/unpause', { containerId });
+    if (onStatusChange) onStatusChange({ status: 'success', message: 'Container resumed successfully' });
+    return response.data;
+  } catch (error) {
+    console.error('Error resuming container:', error);
+    if (onStatusChange) onStatusChange({ status: 'error', message: `Failed to resume container: ${error.message}` });
+    throw error;
+  }
+};
+
 export const stopContainer = async (containerId, onStatusChange) => {
   try {
     if (onStatusChange) onStatusChange({ status: 'stopping', message: 'Stopping container...' });
@@ -199,6 +225,8 @@ const dockerApi = {
   // Containers
   fetchContainers,
   startContainer,
+  pauseContainer,
+  unpauseContainer,
   stopContainer,
   createContainer,
   deleteContainer,

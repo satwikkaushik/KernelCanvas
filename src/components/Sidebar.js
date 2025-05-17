@@ -175,7 +175,7 @@ const TabPanel = (props) => {
   );
 };
 
-const Sidebar = ({ images, networks, isLoading, open, onClose }) => {
+const Sidebar = ({ images = [], networks = [], isLoading, open, onClose }) => {
   const [tabValue, setTabValue] = useState(0);
   const drawerWidth = 280;
   const { showSuccess, showError, showInfo } = useSnackbarContext();

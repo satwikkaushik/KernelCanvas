@@ -121,10 +121,14 @@ app.get('/api/containers', async (req, res) => {
 app.post('/api/containers/start', async (req, res) => {
   try {
     const { containerId } = req.body;
+    console.log('Starting container:', containerId);
+    
     const container = docker.getContainer(containerId);
     await container.start();
+    
     res.json({ message: 'Container started successfully' });
   } catch (error) {
+    console.error('Container start error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -143,12 +147,19 @@ app.post('/api/containers/stop', async (req, res) => {
 app.post('/api/containers/create', async (req, res) => {
   try {
     const containerConfig = req.body;
+    
+    // Log the container configuration for debugging
+    console.log('Creating container with config:', JSON.stringify(containerConfig, null, 2));
+    
+    // Create the container with the provided configuration
     const container = await docker.createContainer(containerConfig);
+    
     res.json({ 
       message: 'Container created successfully',
       containerId: container.id 
     });
   } catch (error) {
+    console.error('Container creation error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -159,6 +170,36 @@ app.delete('/api/containers/:id', async (req, res) => {
     await container.remove({ force: true });
     res.json({ message: 'Container removed successfully' });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/containers/pause', async (req, res) => {
+  try {
+    const { containerId } = req.body;
+    console.log('Pausing container:', containerId);
+    
+    const container = docker.getContainer(containerId);
+    await container.pause();
+    
+    res.json({ message: 'Container paused successfully' });
+  } catch (error) {
+    console.error('Container pause error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/containers/unpause', async (req, res) => {
+  try {
+    const { containerId } = req.body;
+    console.log('Resuming container:', containerId);
+    
+    const container = docker.getContainer(containerId);
+    await container.unpause();
+    
+    res.json({ message: 'Container resumed successfully' });
+  } catch (error) {
+    console.error('Container unpause error:', error);
     res.status(500).json({ error: error.message });
   }
 });

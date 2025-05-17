@@ -8,7 +8,7 @@ import Chip from '@mui/material/Chip';
 import NetworkIcon from '@mui/icons-material/NetworkWifi';
 import DeleteIcon from '@mui/icons-material/Delete';
 
-const NetworkNode = ({ id, x, y, data, onMove, onSelect, onConnect }) => {
+const NetworkNode = ({ id, x, y, data, onMove, onSelect, onConnect, onDelete }) => {
   // Set up drag handler
   const [{ isDragging }, drag] = useDrag({
     type: 'NODE',
@@ -26,15 +26,18 @@ const NetworkNode = ({ id, x, y, data, onMove, onSelect, onConnect }) => {
       }
     },
   });
-
   const handleDeleteNetwork = async (event) => {
     event.stopPropagation();
-    try {
-      await fetch(`http://localhost:5000/api/networks/${data.Id}`, {
-        method: 'DELETE',
-      });
-    } catch (error) {
-      console.error('Error deleting network:', error);
+    if (onDelete) {
+      onDelete(id);
+    } else {
+      try {
+        await fetch(`http://localhost:5000/api/networks/${data.Id}`, {
+          method: 'DELETE',
+        });
+      } catch (error) {
+        console.error('Error deleting network:', error);
+      }
     }
   };
 

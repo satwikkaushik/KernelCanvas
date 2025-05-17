@@ -1,5 +1,4 @@
-// filepath: d:\Nikhil\KernelCanvas\src\components\nodes\ImageNode.js
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { useDrag } from 'react-dnd';
 import Box from '@mui/material/Box';
 import Paper from '@mui/material/Paper';
@@ -8,6 +7,7 @@ import IconButton from '@mui/material/IconButton';
 import Chip from '@mui/material/Chip';
 import ImageIcon from '@mui/icons-material/PhotoLibrary';
 import DeleteIcon from '@mui/icons-material/Delete';
+import LinkIcon from '@mui/icons-material/Link';
 import SvgIcon from '@mui/material/SvgIcon';
 
 // Custom icons for specific images
@@ -43,7 +43,10 @@ const getImageIcon = (imageName) => {
   }
 };
 
-const ImageNode = ({ id, x, y, data, onMove, onSelect }) => {
+const ImageNode = ({ id, x, y, data, onMove, onSelect, onEndConnection, onCancelConnection, onDelete }) => {
+  const nodeRef = useRef(null);
+  const connectorRef = useRef(null);
+
   // Set up drag handler
   const [{ isDragging }, drag] = useDrag({
     type: 'NODE',
@@ -62,6 +65,36 @@ const ImageNode = ({ id, x, y, data, onMove, onSelect }) => {
     },
   });
 
+  // Set drag ref to the paper element
+  drag(nodeRef);
+  // Register the connection point with the global registry
+  useEffect(() => {
+    if (nodeRef.current && connectorRef.current && window.updateConnectionPoint) {
+      const rect = nodeRef.current.getBoundingClientRect();
+      const connectorRect = connectorRef.current.getBoundingClientRect();
+      const canvasRect = document.getElementById('canvas').getBoundingClientRect();
+      
+      window.updateConnectionPoint(id, {
+        x: connectorRect.left + connectorRect.width / 2 - canvasRect.left,
+        y: connectorRect.top + connectorRect.height / 2 - canvasRect.top,
+        nodeType: 'IMAGE',
+        data: data
+      });
+    }
+  }, [id, x, y, data]);
+  const handleConnectorClick = (e) => {
+    e.stopPropagation();
+    if (window.activeConnection && onEndConnection) {
+      // If there's an active connection, complete it
+      const rect = connectorRef.current.getBoundingClientRect();
+      const canvasRect = document.getElementById('canvas').getBoundingClientRect();
+      onEndConnection(id, 'IMAGE', {
+        x: rect.left + rect.width / 2 - canvasRect.left,
+        y: rect.top + rect.height / 2 - canvasRect.top
+      }, data);
+    }
+  };
+
   // Image tag parsing to get a clean name and version
   const imageTag = data.RepoTags && data.RepoTags.length > 0 
     ? data.RepoTags[0]
@@ -72,18 +105,18 @@ const ImageNode = ({ id, x, y, data, onMove, onSelect }) => {
   
   // Container configuration that was set during drop
   const containerConfig = data.containerConfig || {};
-
   return (
     <Paper
-      ref={drag}
-      className="canvas-node node-image"
-      sx={{
+      ref={nodeRef}
+      className="canvas-node node-image"      sx={{
+        position: 'absolute',
         left: x,
         top: y,
         opacity: isDragging ? 0.5 : 1,
         cursor: 'move',
         minWidth: 220,
         zIndex: 100,
+        borderLeft: containerConfig.volumeName ? '4px solid #4caf50' : 'none',
       }}
       elevation={3}
       onClick={() => onSelect()}
@@ -116,15 +149,43 @@ const ImageNode = ({ id, x, y, data, onMove, onSelect }) => {
         <Typography variant="caption" sx={{ display: 'block' }}>
           Environment: {containerConfig.env.join(', ')}
         </Typography>
+      )}      {/* Volume mount point if connected */}
+      {containerConfig.volumePath && containerConfig.volumeName && (
+        <Typography variant="caption" sx={{ display: 'block', color: 'success.main' }}>
+          Volume: {containerConfig.volumeName} → /data/{containerConfig.volumeName}
+        </Typography>
       )}
       
       <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1 }}>
-        <IconButton
+        {/* Connection point */}
+        <Box 
+          ref={connectorRef}
+          className="node-connector"
+          sx={{
+            width: 24,
+            height: 24,
+            borderRadius: '50%',
+            backgroundColor: 'secondary.main',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            mr: 1,
+            '&:hover': {
+              transform: 'scale(1.1)',
+            }
+          }}
+          onClick={handleConnectorClick}
+        >
+          <LinkIcon fontSize="small" sx={{ color: 'white' }} />
+        </Box>        <IconButton
           size="small"
           color="error"
           onClick={(e) => {
             e.stopPropagation();
-            // Handle delete functionality
+            if (onDelete) {
+              onDelete(id);
+            }
           }}
         >
           <DeleteIcon fontSize="small" />

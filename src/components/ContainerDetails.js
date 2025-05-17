@@ -13,6 +13,8 @@ import ListItemText from '@mui/material/ListItemText';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Paper from '@mui/material/Paper';
+import Snackbar from '@mui/material/Snackbar';
+import Alert from '@mui/material/Alert';
 
 import CloseIcon from '@mui/icons-material/Close';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -21,9 +23,11 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ImageIcon from '@mui/icons-material/Image';
 import StorageIcon from '@mui/icons-material/Storage';
+import PauseIcon from '@mui/icons-material/Pause';
 
 import { io } from 'socket.io-client';
 import { Line } from 'react-chartjs-2';
+import { useSnackbarContext } from '../context/SnackbarContext';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -73,6 +77,7 @@ const ContainerDetails = ({ node, onClose }) => {
   const [stats, setStats] = useState(null);
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { showSuccess, showError, showInfo, showWarning } = useSnackbarContext();
   const [cpuData, setCpuData] = useState({
     labels: [],
     datasets: [
@@ -174,11 +179,11 @@ const ContainerDetails = ({ node, onClose }) => {
 
   const handleTabChange = (event, newValue) => {
     setTabValue(newValue);
-  };
-
-  const handleStartContainer = async () => {
+  };  const handleStartContainer = async () => {
     try {
-      await fetch('http://localhost:5000/api/containers/start', {
+      showInfo('Starting container...');
+      
+      const response = await fetch('http://localhost:5000/api/containers/start', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -187,14 +192,25 @@ const ContainerDetails = ({ node, onClose }) => {
           containerId: nodeData.Id,
         }),
       });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to start container');
+      }
+      
+      // Update container state locally
+      await refreshContainerData();
+      
+      showSuccess('Container started successfully');
     } catch (error) {
       console.error('Error starting container:', error);
+      showError(`Failed to start container: ${error.message}`);
     }
-  };
-
-  const handleStopContainer = async () => {
+  };  const handleStopContainer = async () => {
     try {
-      await fetch('http://localhost:5000/api/containers/stop', {
+      showInfo('Stopping container...');
+      
+      const response = await fetch('http://localhost:5000/api/containers/stop', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -203,19 +219,283 @@ const ContainerDetails = ({ node, onClose }) => {
           containerId: nodeData.Id,
         }),
       });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to stop container');
+      }
+      
+      // Update container state locally
+      await refreshContainerData();
+      
+      showSuccess('Container stopped successfully');
     } catch (error) {
       console.error('Error stopping container:', error);
+      showError(`Failed to stop container: ${error.message}`);
     }
-  };
-
-  const handleDeleteContainer = async () => {
+  };    const handleRestartContainer = async () => {
     try {
-      await fetch(`http://localhost:5000/api/containers/${nodeData.Id}`, {
+      showInfo('Restarting container...');
+      
+      // First stop the container
+      const stopResponse = await fetch('http://localhost:5000/api/containers/stop', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          containerId: nodeData.Id,
+        }),
+      });
+      
+      if (!stopResponse.ok) {
+        const error = await stopResponse.json();
+        throw new Error(error.error || 'Failed to stop container during restart');
+      }
+      
+      // Then start it again with a small delay
+      setTimeout(async () => {
+        const startResponse = await fetch('http://localhost:5000/api/containers/start', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            containerId: nodeData.Id,
+          }),
+        });
+        
+        if (!startResponse.ok) {
+          const error = await startResponse.json();
+          throw new Error(error.error || 'Failed to start container during restart');
+        }
+        
+        // Update container state locally
+        await refreshContainerData();
+        
+        showSuccess('Container restarted successfully');
+      }, 1000); // Add a small delay to ensure the container has time to stop
+    } catch (error) {
+      console.error('Error restarting container:', error);
+      showError(`Failed to restart container: ${error.message}`);
+    }
+  };  const handleDeleteContainer = async () => {
+    try {
+      // Confirm before deleting
+      if (!confirm(`Are you sure you want to delete container ${nodeData.Names ? nodeData.Names[0].replace(/^\//, '') : 'Unknown'}?`)) {
+        return;
+      }
+      
+      showInfo('Deleting container...');
+      
+      const response = await fetch(`http://localhost:5000/api/containers/${nodeData.Id}`, {
         method: 'DELETE',
       });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to delete container');
+      }
+      
+      showSuccess('Container deleted successfully');
+      
+      // Close the details panel
       onClose();
     } catch (error) {
       console.error('Error deleting container:', error);
+      showError(`Failed to delete container: ${error.message}`);
+    }
+  };  const handleCreateContainer = async () => {
+    try {
+      // Check if a container has already been created from this image
+      if (nodeData.containerId) {
+        showWarning('Container already created. Use the existing container.');
+        return;
+      }
+
+      showInfo('Creating container...');
+      
+      // Extract the image name and tag
+      const imageName = nodeData.RepoTags && nodeData.RepoTags.length > 0 
+        ? nodeData.RepoTags[0]
+        : nodeData.Id;
+      
+      // Use the image display name or tag as the container name base
+      const displayName = imageName.split('/').pop().split(':')[0];
+      const containerName = `${displayName}_${Date.now()}`;
+      
+      // Create container configuration using data already provided during image configuration
+      const containerConfig = {
+        Image: imageName,
+        name: containerName,
+        ExposedPorts: {},
+        HostConfig: {
+          PortBindings: {},
+          Binds: []
+        }
+      };
+      
+      // If there was a volume or port configuration stored with the image node, use it
+      if (nodeData.containerConfig) {
+        // Add port mappings if specified during image setup
+        if (nodeData.containerConfig.ports) {
+          const portMappings = nodeData.containerConfig.ports.split(',');
+          portMappings.forEach(mapping => {
+            const [hostPort, containerPort] = mapping.trim().split(':');
+            if (hostPort && containerPort) {
+              containerConfig.ExposedPorts[`${containerPort}/tcp`] = {};
+              containerConfig.HostConfig.PortBindings[`${containerPort}/tcp`] = [
+                { HostIp: '0.0.0.0', HostPort: hostPort }
+              ];
+            }
+          });
+        }
+        
+        // Add volume binding if connected to a volume
+        if (nodeData.containerConfig && nodeData.containerConfig.volumeName && nodeData.containerConfig.volumePath) {
+          containerConfig.HostConfig.Binds.push(
+            `${nodeData.containerConfig.volumePath}:/data/${nodeData.containerConfig.volumeName}`
+          );
+          console.log('Added volume binding:', containerConfig.HostConfig.Binds);
+        }
+        
+        // Add environment variables if specified
+        if (nodeData.containerConfig.env && nodeData.containerConfig.env.length > 0) {
+          containerConfig.Env = nodeData.containerConfig.env;
+        }
+      }
+      
+      // Create the container
+      const response = await fetch('http://localhost:5000/api/containers/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(containerConfig),
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        // Store the containerId in the node data
+        nodeData.containerId = data.containerId;
+        showSuccess(`Container "${containerName}" created successfully`);
+      } else {
+        throw new Error(data.error || 'Failed to create container');
+      }
+    } catch (error) {
+      console.error('Error creating container:', error);
+      showError(`Failed to create container: ${error.message}`);
+    }
+  };const handlePauseContainer = async () => {
+    try {
+      showInfo('Pausing container...');
+      
+      const response = await fetch('http://localhost:5000/api/containers/pause', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          containerId: nodeData.Id,
+        }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to pause container');
+      }
+      
+      // Update container state locally
+      await refreshContainerData();
+      
+      showSuccess('Container paused successfully');
+    } catch (error) {
+      console.error('Error pausing container:', error);
+      showError(`Failed to pause container: ${error.message}`);
+    }
+  };
+
+  const handleUnpauseContainer = async () => {
+    try {
+      showInfo('Resuming container...');
+      
+      const response = await fetch('http://localhost:5000/api/containers/unpause', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          containerId: nodeData.Id,
+        }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to resume container');
+      }
+      
+      // Update container state locally
+      await refreshContainerData();
+      
+      showSuccess('Container resumed successfully');
+    } catch (error) {
+      console.error('Error resuming container:', error);
+      showError(`Failed to resume container: ${error.message}`);
+    }
+  };
+  const handleRunContainer = async () => {
+    try {
+      if (!nodeData.containerId) {
+        showError('No container to run. Please create a container first.');
+        return;
+      }
+
+      showInfo('Starting container...');
+      
+      const response = await fetch('http://localhost:5000/api/containers/start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          containerId: nodeData.containerId,
+        }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to start container');
+      }
+      
+      showSuccess('Container started successfully');
+    } catch (error) {
+      console.error('Error running container:', error);
+      showError(`Failed to run container: ${error.message}`);
+    }
+  };
+  // Refresh container data
+  const refreshContainerData = async () => {
+    try {
+      const response = await fetch(`http://localhost:5000/api/containers`);
+      const containers = await response.json();
+      
+      // Find the current container
+      const updatedContainer = containers.find(container => container.Id === nodeData.Id);
+      
+      if (updatedContainer) {
+        // Update the node data with the latest container information
+        node.data = updatedContainer;
+        
+        // Force a re-render by creating a new object
+        const updatedNodeData = { ...updatedContainer };
+        nodeData.State = updatedNodeData.State;
+        
+        console.log('Container data refreshed:', updatedContainer);
+      }
+    } catch (error) {
+      console.error('Error refreshing container data:', error);
+      showError(`Error refreshing container data: ${error.message}`);
     }
   };
 
@@ -253,9 +533,7 @@ const ContainerDetails = ({ node, onClose }) => {
     
     const date = new Date(timestamp * 1000);
     return date.toLocaleString();
-  };
-
-  // Render image details
+  };  // Render image details
   const renderImageDetails = () => {
     if (!nodeData) return <Typography>No image data available</Typography>;
     
@@ -266,6 +544,9 @@ const ContainerDetails = ({ node, onClose }) => {
     
     const [name, version] = imageTag.split(':');
     const displayName = name.split('/').pop();
+    
+    // Determine if a container has already been created
+    const containerCreated = !!nodeData.containerId;
 
     return (
       <>
@@ -280,6 +561,29 @@ const ContainerDetails = ({ node, onClose }) => {
         </Box>
         
         <Divider sx={{ mb: 2 }} />
+        
+        {/* Container Action Buttons */}
+        <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, p: 1, mb: 2 }}>
+          <Button
+            startIcon={<StorageIcon />}
+            variant="contained"
+            color="primary"
+            onClick={handleCreateContainer}
+            disabled={containerCreated}
+          >
+            Create Container
+          </Button>
+          {containerCreated && (
+            <Button
+              startIcon={<PlayArrowIcon />}
+              variant="contained"
+              color="success"
+              onClick={handleRunContainer}
+            >
+              Run Container
+            </Button>
+          )}
+        </Box>
         
         <List dense>
           <ListItem>
@@ -433,32 +737,43 @@ const ContainerDetails = ({ node, onClose }) => {
         </List>
       </>
     );
-  };
-
-  // Render container details
+  };  // Render container details
   const renderContainerDetails = () => {
+    const isRunning = nodeData.State === 'running';
+    const isPaused = nodeData.State === 'paused';
+    
     return (
       <>
-        <Box sx={{ display: 'flex', justifyContent: 'space-around', p: 1 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, p: 1 }}>
           <Button
-            startIcon={<PlayArrowIcon />}
+            startIcon={isRunning ? <StopIcon /> : <PlayArrowIcon />}
             variant="contained"
-            color="success"
+            color={isRunning ? "warning" : "success"}
             size="small"
-            onClick={handleStartContainer}
-            disabled={nodeData.State === 'running'}
+            onClick={isRunning ? handleStopContainer : handleStartContainer}
+            disabled={isPaused}
           >
-            Start
+            {isRunning ? "Stop" : "Start"}
           </Button>
           <Button
-            startIcon={<StopIcon />}
+            startIcon={isPaused ? <PlayArrowIcon /> : <PauseIcon />}
             variant="contained"
-            color="warning"
+            color={isPaused ? "info" : "default"}
             size="small"
-            onClick={handleStopContainer}
-            disabled={nodeData.State !== 'running'}
+            onClick={isPaused ? handleUnpauseContainer : handlePauseContainer}
+            disabled={!isRunning && !isPaused}
           >
-            Stop
+            {isPaused ? "Resume" : "Pause"}
+          </Button>
+          <Button
+            startIcon={<RestartAltIcon />}
+            variant="contained"
+            color="primary"
+            size="small"
+            onClick={handleRestartContainer}
+            disabled={!isRunning}
+          >
+            Restart
           </Button>
           <Button
             startIcon={<DeleteIcon />}
@@ -515,8 +830,7 @@ const ContainerDetails = ({ node, onClose }) => {
                   />
                 } 
               />
-            </ListItem>
-            <ListItem>
+            </ListItem>            <ListItem>
               <ListItemText 
                 primary="Ports" 
                 secondary={
@@ -528,6 +842,23 @@ const ContainerDetails = ({ node, onClose }) => {
                 } 
               />
             </ListItem>
+            
+            {nodeData.Mounts && nodeData.Mounts.length > 0 && (
+              <ListItem>
+                <ListItemText 
+                  primary="Volume Mounts" 
+                  secondary={
+                    <Box sx={{ mt: 0.5 }}>
+                      {nodeData.Mounts.map((mount, idx) => (
+                        <Typography key={idx} variant="body2" component="div">
+                          {mount.Source} → {mount.Destination} ({mount.Mode})
+                        </Typography>
+                      ))}
+                    </Box>
+                  } 
+                />
+              </ListItem>
+            )}
           </List>
         </TabPanel>
         
@@ -606,7 +937,6 @@ const ContainerDetails = ({ node, onClose }) => {
       </>
     );
   };
-
   return (
     <Drawer
       anchor="right"
@@ -645,8 +975,7 @@ const ContainerDetails = ({ node, onClose }) => {
       {nodeType === 'CONTAINER' && renderContainerDetails()}
       {nodeType === 'IMAGE' && renderImageDetails()}
       {nodeType === 'VOLUME' && renderVolumeDetails()}
-      
-      {nodeType !== 'CONTAINER' && nodeType !== 'IMAGE' && nodeType !== 'VOLUME' && (
+        {nodeType !== 'CONTAINER' && nodeType !== 'IMAGE' && nodeType !== 'VOLUME' && (
         <Box sx={{ p: 2 }}>
           <Typography variant="body1">
             Details for {nodeType} coming soon!

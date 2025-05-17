@@ -30,16 +30,16 @@ function App() {
         const containersResponse = await fetch('http://localhost:5000/api/containers');
         const containersData = await containersResponse.json();
         setContainers(containersData);
-        
-        // Fetch images
+          // Fetch images
         const imagesResponse = await fetch('http://localhost:5000/api/images');
         const imagesData = await imagesResponse.json();
-        setImages(imagesData);
-        
-        // Fetch networks
+        // Make sure images is always an array, even if API returns null or undefined
+        setImages(Array.isArray(imagesData) ? imagesData : []);
+          // Fetch networks
         const networksResponse = await fetch('http://localhost:5000/api/networks');
         const networksData = await networksResponse.json();
-        setNetworks(networksData);
+        // Make sure networks is always an array, even if API returns null or undefined
+        setNetworks(Array.isArray(networksData) ? networksData : []);
         
       } catch (error) {
         console.error('Error fetching data:', error);
