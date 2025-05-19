@@ -57,7 +57,10 @@ const Canvas = ({ networks, onNodeSelect }) => {
   const [volumeDialogOpen, setVolumeDialogOpen] = useState(false);
   const [volumeConfig, setVolumeConfig] = useState({
     name: '',
-    path: ''
+    path: '',
+    permissions: 'rw',   // 'rw' for read-write or 'ro' for read-only
+    ownerId: '',         // Optional UID for the volume
+    groupId: ''          // Optional GID for the volume
   });
 
   // Connection-related state
@@ -210,7 +213,7 @@ const Canvas = ({ networks, onNodeSelect }) => {
     
     const { sourceId, sourceData } = activeConnection;
     
-    // Create a connection object
+    // Create a connection object with volume security information
     const newConnection = {
       id: `conn-${sourceId}-${targetId}`,
       sourceId,
@@ -222,10 +225,10 @@ const Canvas = ({ networks, onNodeSelect }) => {
       volumeData: sourceData,
     };
     
-    // Update the image node with the volume path information
+    // Update the image node with the volume path and security information
     setCanvasNodes(canvasNodes.map(node => {
       if (node.id === targetId) {
-        // Add the volume path to the container config
+        // Add the volume path and security information to the container config
         return {
           ...node,
           data: {
@@ -233,7 +236,10 @@ const Canvas = ({ networks, onNodeSelect }) => {
             containerConfig: {
               ...node.data.containerConfig,
               volumePath: sourceData.path,
-              volumeName: sourceData.name
+              volumeName: sourceData.name,
+              volumePermissions: sourceData.permissions || 'rw',
+              volumeOwnerId: sourceData.ownerId || '',
+              volumeGroupId: sourceData.groupId || ''
             }
           }
         };
@@ -242,10 +248,23 @@ const Canvas = ({ networks, onNodeSelect }) => {
     }));
     
     // Add the connection to the list
-    setConnections([...connections, newConnection]);    // Show success message
+    setConnections([...connections, newConnection]);
+    
+    // Show success message with permission details
+    const permissionType = sourceData.permissions === 'ro' ? 'read-only' : 'read-write';
+    let successMessage = `Connected volume "${sourceData.name}" to container - mounted at /data/${sourceData.name} with ${permissionType} access`;
+    
+    // Add ownership details to message if specified
+    if (sourceData.ownerId || sourceData.groupId) {
+      const ownershipInfo = [];
+      if (sourceData.ownerId) ownershipInfo.push(`UID: ${sourceData.ownerId}`);
+      if (sourceData.groupId) ownershipInfo.push(`GID: ${sourceData.groupId}`);
+      successMessage += ` (${ownershipInfo.join(', ')})`;
+    }
+    
     setFeedback({
       open: true,
-      message: `Connected volume "${sourceData.name}" to container - mounted at /data/${sourceData.name}`,
+      message: successMessage,
       severity: 'success',
       autoHideDuration: 4000
     });
@@ -271,12 +290,22 @@ const Canvas = ({ networks, onNodeSelect }) => {
       y,
       data: {
         name: volumeConfig.name || 'New Volume',
-        path: convertedPath || '/path/to/volume'
+        path: convertedPath || '/path/to/volume',
+        permissions: volumeConfig.permissions || 'rw',
+        ownerId: volumeConfig.ownerId || '',
+        groupId: volumeConfig.groupId || ''
       }
     };
 
     setCanvasNodes([...canvasNodes, newNode]);
     setVolumeDialogOpen(false);
+    
+    setFeedback({
+      open: true,
+      message: `Volume "${volumeConfig.name}" created with ${volumeConfig.permissions === 'ro' ? 'read-only' : 'read-write'} access`,
+      severity: 'success',
+      autoHideDuration: 4000
+    });
   };
   // Handle node deletion
   const handleNodeDelete = (nodeId) => {
@@ -453,7 +482,21 @@ const Canvas = ({ networks, onNodeSelect }) => {
     // Get volume data for tooltip
     const volumeName = conn.volumeData?.name || 'Unknown volume';
     const volumePath = conn.volumeData?.path || '/path';
-    const tooltipText = `Volume mount: ${volumeName} → /data/${volumeName}`;
+    
+    // Build tooltip text with security information
+    const isReadOnly = conn.volumeData?.permissions === 'ro';
+    const accessMode = isReadOnly ? 'read-only' : 'read-write';
+    
+    let tooltipText = `Volume mount: ${volumeName} → /data/${volumeName} (${accessMode})`;
+    
+    // Add ownership details if present
+    const ownerInfo = [];
+    if (conn.volumeData?.ownerId) ownerInfo.push(`UID: ${conn.volumeData.ownerId}`);
+    if (conn.volumeData?.groupId) ownerInfo.push(`GID: ${conn.volumeData.groupId}`);
+    
+    if (ownerInfo.length > 0) {
+      tooltipText += `\nOwnership: ${ownerInfo.join(', ')}`;
+    }
     
     return (
       <Tooltip 
@@ -469,11 +512,11 @@ const Canvas = ({ networks, onNodeSelect }) => {
             top: conn.sourceY,
             width: length,
             height: '3px',
-            backgroundColor: '#4caf50',
+            backgroundColor: isReadOnly ? '#f44336' : '#4caf50', // Red for read-only, green for read-write
             transformOrigin: 'left center',
             transform: `rotate(${angle}deg)`,
             zIndex: 90,
-            boxShadow: '0 0 5px rgba(76, 175, 80, 0.8)',
+            boxShadow: `0 0 5px rgba(${isReadOnly ? '244, 67, 54' : '76, 175, 80'}, 0.8)`,
             cursor: 'pointer'
           }}
         />
@@ -528,7 +571,11 @@ const Canvas = ({ networks, onNodeSelect }) => {
             PortBindings: {},
             Binds: []
           },
-          Env: node.data.containerConfig?.env || []
+          Env: node.data.containerConfig?.env || [],
+          // Pass volume security options for the API
+          volumePermissions: node.data.containerConfig?.volumePermissions,
+          volumeOwnerId: node.data.containerConfig?.volumeOwnerId,
+          volumeGroupId: node.data.containerConfig?.volumeGroupId
         };
         
         // Add port mappings if specified
@@ -550,9 +597,39 @@ const Canvas = ({ networks, onNodeSelect }) => {
         
         // Add volume binding if connected to a volume
         if (node.data.containerConfig?.volumePath && node.data.containerConfig?.volumeName) {
-          containerConfig.HostConfig.Binds.push(
-            `${node.data.containerConfig.volumePath}:/data/${node.data.containerConfig.volumeName}`
-          );
+          // Build the bind string with proper options
+          const volumePath = node.data.containerConfig.volumePath;
+          const volumeName = node.data.containerConfig.volumeName;
+          const containerPath = `/data/${volumeName}`;
+          
+          // Add security options
+          const securityOptions = [];
+          
+          // Add read-only flag if permissions are 'ro'
+          if (node.data.containerConfig.volumePermissions === 'ro') {
+            securityOptions.push('ro');
+          } else {
+            securityOptions.push('rw');
+          }
+          
+          // Add ownership options if provided
+          if (node.data.containerConfig.volumeOwnerId) {
+            securityOptions.push(`uid=${node.data.containerConfig.volumeOwnerId}`);
+          }
+          
+          if (node.data.containerConfig.volumeGroupId) {
+            securityOptions.push(`gid=${node.data.containerConfig.volumeGroupId}`);
+          }
+          
+          // Add the z option for SELinux shared label
+          securityOptions.push('z');
+          
+          // Create the bind string with all options
+          const bindString = securityOptions.length > 0 
+            ? `${volumePath}:${containerPath}:${securityOptions.join(',')}`
+            : `${volumePath}:${containerPath}`;
+          
+          containerConfig.HostConfig.Binds.push(bindString);
         }
         
         // Create the container
@@ -830,6 +907,59 @@ const Canvas = ({ networks, onNodeSelect }) => {
               onChange={(e) => setVolumeConfig(prev => ({ ...prev, path: e.target.value }))}
               placeholder="Enter local storage path"
               helperText="Example: /path/to/local/storage"
+            />
+            
+            <FormControl component="fieldset" margin="normal">
+              <Typography variant="subtitle2">Access Permissions</Typography>
+              <Box sx={{ display: 'flex', mt: 1 }}>
+                <Button 
+                  variant={volumeConfig.permissions === 'rw' ? 'contained' : 'outlined'} 
+                  onClick={() => setVolumeConfig(prev => ({ ...prev, permissions: 'rw' }))
+                  }
+                  sx={{ mr: 1 }}
+                  size="small"
+                >
+                  Read-Write
+                </Button>
+                <Button 
+                  variant={volumeConfig.permissions === 'ro' ? 'contained' : 'outlined'} 
+                  onClick={() => setVolumeConfig(prev => ({ ...prev, permissions: 'ro' }))
+                  }
+                  size="small"
+                >
+                  Read-Only
+                </Button>
+              </Box>
+            </FormControl>
+            
+            <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
+              Advanced Security Options
+            </Typography>
+            
+            <TextField
+              fullWidth
+              label="Owner ID (UID)"
+              variant="outlined"
+              margin="normal"
+              value={volumeConfig.ownerId}
+              onChange={(e) => setVolumeConfig(prev => ({ ...prev, ownerId: e.target.value }))}
+              placeholder="e.g., 1000"
+              helperText="User ID for file ownership"
+              size="small"
+              type="number"
+            />
+            
+            <TextField
+              fullWidth
+              label="Group ID (GID)"
+              variant="outlined" 
+              margin="normal"
+              value={volumeConfig.groupId}
+              onChange={(e) => setVolumeConfig(prev => ({ ...prev, groupId: e.target.value }))}
+              placeholder="e.g., 1000"
+              helperText="Group ID for file ownership"
+              size="small"
+              type="number"
             />
           </Box>
         </DialogContent>

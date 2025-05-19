@@ -148,6 +148,44 @@ app.post('/api/containers/create', async (req, res) => {
   try {
     const containerConfig = req.body;
     
+    // Security enhancement: Process volume bindings to add security options
+    if (containerConfig.HostConfig && containerConfig.HostConfig.Binds) {
+      containerConfig.HostConfig.Binds = containerConfig.HostConfig.Binds.map(binding => {
+        // Parse the existing binding
+        const parts = binding.split(':');
+        const volumePath = parts[0];
+        const containerPath = parts[1];
+        
+        if (parts.length >= 2) {
+          // Extract any existing options or set defaults
+          let options = parts.length > 2 ? parts[2] : '';
+          
+          // Add z option for SELinux shared labels if not present
+          if (!options.includes('z')) {
+            options = options ? `${options},z` : 'z';
+          }
+          
+          // Check if permissions are specified in the request
+          if (containerConfig.volumePermissions && !options.includes('ro') && !options.includes('rw')) {
+            options = options ? `${options},${containerConfig.volumePermissions}` : containerConfig.volumePermissions;
+          }
+          
+          // Add user/group ownership if provided
+          if (containerConfig.volumeOwnerId && !options.includes('uid=')) {
+            options = options ? `${options},uid=${containerConfig.volumeOwnerId}` : `uid=${containerConfig.volumeOwnerId}`;
+          }
+          
+          if (containerConfig.volumeGroupId && !options.includes('gid=')) {
+            options = options ? `${options},gid=${containerConfig.volumeGroupId}` : `gid=${containerConfig.volumeGroupId}`;
+          }
+          
+          return `${volumePath}:${containerPath}:${options}`;
+        }
+        
+        return binding;
+      });
+    }
+    
     // Log the container configuration for debugging
     console.log('Creating container with config:', JSON.stringify(containerConfig, null, 2));
     

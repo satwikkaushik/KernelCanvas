@@ -8,6 +8,9 @@ import FolderIcon from '@mui/icons-material/Folder';
 import IconButton from '@mui/material/IconButton';
 import DeleteIcon from '@mui/icons-material/Delete';
 import LinkIcon from '@mui/icons-material/Link';
+import LockIcon from '@mui/icons-material/Lock';
+import LockOpenIcon from '@mui/icons-material/LockOpen';
+import Tooltip from '@mui/material/Tooltip';
 
 const VolumeNode = ({ id, x, y, data, onMove, onSelect, onStartConnection, onDelete, connections }) => {
   const nodeRef = useRef(null);
@@ -89,7 +92,24 @@ const VolumeNode = ({ id, x, y, data, onMove, onSelect, onStartConnection, onDel
       }, data);
     }
   };
-  return (    <Paper
+
+  // Get security details to display
+  const isReadOnly = data.permissions === 'ro';
+  const hasOwnership = !!(data.ownerId || data.groupId);
+  
+  // Create a tooltip message about security settings
+  const securityTooltip = () => {
+    const messages = [];
+    messages.push(`Access: ${isReadOnly ? 'Read-Only' : 'Read-Write'}`);
+    
+    if (data.ownerId) messages.push(`Owner ID: ${data.ownerId}`);
+    if (data.groupId) messages.push(`Group ID: ${data.groupId}`);
+    
+    return messages.join('\n');
+  };
+
+  return (
+    <Paper
       ref={nodeRef}
       className="canvas-node node-volume"
       sx={{
@@ -103,17 +123,46 @@ const VolumeNode = ({ id, x, y, data, onMove, onSelect, onStartConnection, onDel
         flexDirection: 'column',
         alignItems: 'center',
         width: 'auto',
+        minWidth: '120px',
         zIndex: 100,
         borderBottom: connected ? '4px solid #4caf50' : 'none',
       }}
       elevation={3}
       onClick={() => onSelect && onSelect()}
     >
-      <FolderIcon color={connected ? "success" : "primary"} fontSize="medium" />      <Typography variant="caption" sx={{ mt: 0.5, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+        <FolderIcon color={connected ? "success" : "primary"} fontSize="medium" />
+        {/* Security indicator icon */}
+        {isReadOnly && (
+          <Tooltip title="This volume is read-only">
+            <LockIcon fontSize="small" color="error" sx={{ ml: 0.5 }} />
+          </Tooltip>
+        )}
+        {!isReadOnly && hasOwnership && (
+          <Tooltip title="This volume has ownership settings">
+            <LockOpenIcon fontSize="small" color="warning" sx={{ ml: 0.5 }} />
+          </Tooltip>
+        )}
+      </Box>
+      
+      <Typography variant="caption" sx={{ mt: 0.5, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {data.name || 'Volume'}
-      </Typography>      <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      </Typography>
+      
+      <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {data.path || '/path'}
       </Typography>
+      
+      {/* Show security chip with tooltip */}
+      <Tooltip title={securityTooltip()}>
+        <Chip
+          label={isReadOnly ? "Read-Only" : "Read-Write"}
+          size="small"
+          color={isReadOnly ? "error" : hasOwnership ? "warning" : "default"}
+          variant="outlined"
+          sx={{ mt: 0.5, fontSize: '0.6rem' }}
+        />
+      </Tooltip>
       
       {connected && (
         <Chip
@@ -128,7 +177,8 @@ const VolumeNode = ({ id, x, y, data, onMove, onSelect, onStartConnection, onDel
       <Box sx={{ display: 'flex', justifyContent: 'center', mt: 0.5 }}>
         <IconButton
           size="small"
-          color="error"          onClick={(e) => {
+          color="error"          
+          onClick={(e) => {
             e.stopPropagation();
             if (onDelete) {
               onDelete(id);
